@@ -3,43 +3,37 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
-backtest_results = []
-days_to_collect = 30
-current_day = 0
-found_days = 0
+results = []
+days_collected = 0
+days_back = 0
 
-print(f"📂 Current Directory: {os.getcwd()}")
+print("🔍 Searching for the last 30 trading days...")
 
-# Loop back up to 45 days to find 30 trading days
-while found_days < days_to_collect and current_day < 45:
-    date_str = (datetime.now() - timedelta(days=current_day)).strftime("%d-%m-%Y")
+# Loop until we have 30 days of data (skipping weekends/holidays)
+while days_collected < 30 and days_back < 60:
+    date_to_check = (datetime.now() - timedelta(days=days_back)).strftime("%d-%m-%Y")
     try:
-        df = nse_fno_bhavcopy(date_str)
+        df = nse_fno_bhavcopy(date_to_check)
         if not df.empty:
-            # Your logic: Price up > 2% and OI down > 5%
+            # Logic: Short Covering (Price Up > 2%, OI Down < -5%)
+            # This identifies stocks where sellers are panicking
             signals = df[(df['pChange'] > 2) & (df['changeOI'] < -5)]
+            
             for _, row in signals.iterrows():
-                backtest_results.append({
-                    'Date': date_str,
+                results.append({
+                    'Date': date_to_check,
                     'Symbol': row['symbol'],
-                    'Price_Change': row['pChange'],
-                    'OI_Change': row['changeOI'],
-                    'Price': row['lastPrice']
+                    'Price_Change_%': row['pChange'],
+                    'OI_Change_%': row['changeOI'],
+                    'Closing_Price': row['lastPrice']
                 })
-            found_days += 1
-            print(f"✅ {date_str}: Found {len(signals)} signals")
+            days_collected += 1
+            print(f"✅ {date_to_check}: Found {len(signals)} stocks")
     except:
-        pass
-    current_day += 1
+        pass # Skip if it's a weekend or holiday
+    days_back += 1
 
-# Force save to the current folder
-filename = "accuracy_report_30days.csv"
-if backtest_results:
-    df_final = pd.DataFrame(backtest_results)
-    df_final.to_csv(filename, index=False)
-    print(f"💾 SUCCESS: Saved {len(backtest_results)} rows to {filename}")
-else:
-    # Create a dummy file so the ZIP is never empty
-    with open(filename, "w") as f:
-        f.write("Date,Symbol,Price\nNo data found,None,0")
-    print("⚠️ No signals found, created empty report.")
+# Create the file even if 0 results (though history will have data)
+final_df = pd.DataFrame(results)
+final_df.to_csv("accuracy_report_30days.csv", index=False)
+print(f"💾 Saved {len(results)} records to accuracy_report_30days.csv")
