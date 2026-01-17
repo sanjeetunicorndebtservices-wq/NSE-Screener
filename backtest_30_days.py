@@ -2,34 +2,45 @@ from nsepython import *
 import pandas as pd
 from datetime import datetime, timedelta
 
-# List to store our backtest findings
 backtest_results = []
+days_found = 0
+check_day = 0
 
-print("🚀 Starting Backtest for the last 30 days...")
+print("🚀 Starting Professional 30-Day Backtest...")
 
-for i in range(1, 40):  # Check 40 days to ensure we get 30 trading days
-    date_str = (datetime.now() - timedelta(days=i)).strftime("%d-%m-%Y")
+# We loop back 45 days to ensure we find at least 30 trading days
+while days_found < 30 and check_day < 45:
+    date_str = (datetime.now() - timedelta(days=check_day)).strftime("%d-%m-%Y")
     
     try:
-        # 1. Fetch data for that specific day
+        # Fetch the bhavcopy for this specific date
         df = nse_fno_bhavcopy(date_str)
         
-        # 2. Apply your Scanner Logic: Price Up > 2% and OI Down (Short Covering)
-        signals = df[(df['pChange'] > 2) & (df['changeOI'] < -5)]
-        
-        for _, row in signals.iterrows():
-            backtest_results.append({
-                'Date': date_str,
-                'Symbol': row['symbol'],
-                'Price_Change_%': row['pChange'],
-                'OI_Change_%': row['changeOI'],
-                'Close_Price': row['lastPrice']
-            })
-        print(f"✅ Processed: {date_str} | Found {len(signals)} stocks")
+        if not df.empty:
+            # Logic: Short Covering (Price up > 2%, OI down > 5%)
+            signals = df[(df['pChange'] > 2) & (df['changeOI'] < -5)]
+            
+            for _, row in signals.iterrows():
+                backtest_results.append({
+                    'Trading_Date': date_str,
+                    'Symbol': row['symbol'],
+                    'Price_Change_%': row['pChange'],
+                    'OI_Change_%': row['changeOI'],
+                    'Close_Price': row['lastPrice']
+                })
+            
+            print(f"✅ Day {days_found + 1}: Found data for {date_str}")
+            days_found += 1
     except:
-        continue # Skip weekends/holidays
+        # If it fails (weekend/holiday), just skip it
+        pass
+    
+    check_day += 1
 
-# 3. Save the results to a CSV
-report = pd.DataFrame(backtest_results)
-report.to_csv("accuracy_report_30days.csv", index=False)
-print("✨ Done! Download 'accuracy_report_30days.csv' for the full list.")
+# Save the final report
+if backtest_results:
+    report = pd.DataFrame(backtest_results)
+    report.to_csv("accuracy_report_30days.csv", index=False)
+    print(f"✨ SUCCESS: Generated report with {len(backtest_results)} signals.")
+else:
+    print("❌ Critical Error: No records found even in history.")
