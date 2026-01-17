@@ -14,7 +14,7 @@ def fetch_trade_list():
 
     curr = start_date
     while curr <= end_date:
-        if curr.weekday() < 5:
+        if curr.weekday() < 5:  # Skip weekends
             try:
                 df = nse.get_fno_bhav_copy(curr)
 
@@ -22,25 +22,28 @@ def fetch_trade_list():
                     curr += timedelta(days=1)
                     continue
 
+                # Clean column names
                 df.columns = df.columns.str.strip()
 
                 # Futures only
                 df = df[df['INSTRUMENT'].isin(['FUTSTK', 'FUTIDX'])].copy()
 
-                # Required columns check
-                required_cols = ['SYMBOL', 'OPEN', 'CLOSE', 'OPEN_INT', 'CHG_IN_OI']
-                if not all(col in df.columns for col in required_cols):
+                # Required columns
+                required = ['SYMBOL', 'OPEN', 'CLOSE', 'OPEN_INT', 'CHG_IN_OI']
+                if not all(col in df.columns for col in required):
+                    print(f"⚠️ {curr.date()} → Missing required columns")
                     curr += timedelta(days=1)
                     continue
 
                 # Price % change
                 df['PRICE_PCT'] = ((df['CLOSE'] - df['OPEN']) / df['OPEN']) * 100
 
-                # OI % change
+                # OI % change (safe)
                 prev_oi = df['OPEN_INT'] - df['CHG_IN_OI']
+                df = df[prev_oi != 0]
                 df['OI_PCT'] = (df['CHG_IN_OI'] / prev_oi) * 100
 
-                # BTST / STBT logic
+                # 🔥 BTST / STBT Logic
                 watchlist = df[
                     ((df['PRICE_PCT'] > 2) & (df['OI_PCT'] < -5)) |
                     ((df['PRICE_PCT'] < -2) & (df['OI_PCT'] > 5))
@@ -52,24 +55,29 @@ def fetch_trade_list():
                         lambda x: 'BUY' if x > 0 else 'SELL'
                     )
 
-                    final = watchlist[['DATE', 'SYMBOL', 'CLOSE', 'PRICE_PCT', 'OI_PCT', 'ACTION']]
-                    all_days_data.append(final)
+                    all_days_data.append(
+                        watchlist[['DATE', 'SYMBOL', 'CLOSE', 'PRICE_PCT', 'OI_PCT', 'ACTION']]
+                    )
 
-                    print(f"✅ {curr.date()} → {len(final)} stocks")
+                    print(f"✅ {curr.date()} → {len(watchlist)} stocks")
 
-                time.sleep(1)
+                time.sleep(1)  # NSE rate safety
 
             except Exception as e:
-                print(f"❌ Error on {curr.date()}: {e}")
+                print(f"❌ {curr.date()} → {e}")
 
         curr += timedelta(days=1)
 
+    # 🔒 ALWAYS create CSV (critical for GitHub Actions)
     if all_days_data:
         report = pd.concat(all_days_data)
-        report.to_csv("watchlist_30_days.csv", index=False)
-        print("💾 watchlist_30_days.csv created successfully")
     else:
-        print("⚠️ No signals found in last 30 days")
+        report = pd.DataFrame(
+            columns=['DATE', 'SYMBOL', 'CLOSE', 'PRICE_PCT', 'OI_PCT', 'ACTION']
+        )
+
+    report.to_csv("watchlist_30_days.csv", index=False)
+    print(f"💾 watchlist_30_days.csv created | Rows: {len(report)}")
 
 if __name__ == "__main__":
     fetch_trade_list()
