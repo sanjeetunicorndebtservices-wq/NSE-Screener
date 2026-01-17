@@ -23,7 +23,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python get_history.py
+        run: python backtest_30_days.py
 
       - name: Archive Daily Report
         uses: actions/upload-artifact@v4
