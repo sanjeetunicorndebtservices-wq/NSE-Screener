@@ -1,4 +1,4 @@
-name: Daily Stock Scan
+name: Historical Stock Scan
 on:
   workflow_dispatch:
 
@@ -7,21 +7,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Install Tools
         run: pip install nsepython pandas requests
 
-      - name: Run Backtest
-        run: python backtest_30_days.py
+      - name: Run History Fetcher
+        run: python get_history.py
 
-      - name: Archive Results
+      - name: Upload Master Report
         uses: actions/upload-artifact@v4
         with:
-          name: Trading-Report
-          path: "**/*.csv"  # This forces GitHub to find the file anywhere
+          name: Full-History-Report
+          path: master_history_report.csv
