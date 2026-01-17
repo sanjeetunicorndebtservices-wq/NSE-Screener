@@ -5,14 +5,24 @@ import time
 
 nse = nsefin.NSEClient()
 
+COLUMNS = [
+    "DATE",
+    "SYMBOL",
+    "LAST_PRICE",
+    "PRICE_CHANGE_PCT",
+    "OI_CHANGE_PCT",
+    "SIGNAL_TYPE",
+    "CONFIDENCE_SCORE"
+]
+
 def classify_signal(price_pct, oi_pct):
-    if price_pct > 1.5 and oi_pct > 3:
+    if price_pct > 0.8 and oi_pct > 1.5:
         return "LONG_BUILDUP"
-    if price_pct < -1.5 and oi_pct > 3:
+    if price_pct < -0.8 and oi_pct > 1.5:
         return "SHORT_BUILDUP"
-    if price_pct > 1.5 and oi_pct < -3:
+    if price_pct > 0.8 and oi_pct < -1.5:
         return "SHORT_COVERING"
-    if price_pct < -1.5 and oi_pct < -3:
+    if price_pct < -0.8 and oi_pct < -1.5:
         return "LONG_UNWINDING"
     return None
 
@@ -42,8 +52,8 @@ def run_history_scan():
                 df['OI_PCT'] = (df['CHG_IN_OI'] / prev_oi) * 100
 
                 for _, r in df.iterrows():
-                    signal = classify_signal(r['PRICE_PCT'], r['OI_PCT'])
-                    if not signal:
+                    sig = classify_signal(r['PRICE_PCT'], r['OI_PCT'])
+                    if not sig:
                         continue
 
                     rows.append({
@@ -52,19 +62,20 @@ def run_history_scan():
                         "LAST_PRICE": round(r['CLOSE'], 2),
                         "PRICE_CHANGE_PCT": round(r['PRICE_PCT'], 2),
                         "OI_CHANGE_PCT": round(r['OI_PCT'], 2),
-                        "SIGNAL_TYPE": signal,
+                        "SIGNAL_TYPE": sig,
                         "CONFIDENCE_SCORE": confidence_score(r['PRICE_PCT'], r['OI_PCT'])
                     })
 
                 time.sleep(1)
 
             except Exception as e:
-                print(f"{curr.date()} → {e}")
+                print(curr.date(), e)
 
         curr += timedelta(days=1)
 
-    pd.DataFrame(rows).to_csv("watchlist_30_days.csv", index=False)
-    print("✅ watchlist_30_days.csv generated")
+    final_df = pd.DataFrame(rows, columns=COLUMNS)
+    final_df.to_csv("watchlist_30_days.csv", index=False)
+    print("✅ watchlist_30_days.csv rows:", len(final_df))
 
 if __name__ == "__main__":
     run_history_scan()
