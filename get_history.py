@@ -5,57 +5,66 @@ import time
 
 nse = nsefin.NSEClient()
 
+def get_col(df, keywords):
+    """Finds the actual column name from a list of possible keywords"""
+    for col in df.columns:
+        if any(key in col.upper() for key in keywords):
+            return col
+    return None
+
 def fetch_trade_list():
     all_days_data = []
-    # Aaj se 30 trading days peeche jaayenge
     end_date = datetime.now()
     start_date = end_date - timedelta(days=45) 
     
-    print(f"🔍 Filtering Stocks for Watchlist (Last 30 Days)...")
+    print(f"🔍 Scanning Last 30 Trading Days...")
 
     curr = start_date
     while curr <= end_date:
-        if curr.weekday() < 5: # No Weekends
+        if curr.weekday() < 5: 
             try:
                 raw_df = nse.get_fno_bhav_copy(curr)
                 if raw_df is not None and not raw_df.empty:
-                    # Clean Column Names
-                    raw_df.columns = [c.upper().strip() for c in raw_df.columns]
+                    # Step 1: Normalize columns (remove spaces)
+                    raw_df.columns = [c.strip() for c in raw_df.columns]
                     
-                    # --- DHASU FILTER ---
-                    # Sirf Futures stocks rakhein, Options ki thousands lines hata dein
-                    df = raw_df[raw_df['INSTRUMENT'].isin(['FUTSTK', 'FUTIDX'])].copy()
-                    
-                    p_col = next((c for c in df.columns if 'PCHANGE' in c or 'P_CHANGE' in c), None)
-                    oi_col = next((c for c in df.columns if 'CHANGEOI' in c or 'CHANGE_OI' in c), None)
-                    
-                    if p_col and oi_col:
-                        # Logic for next day watchlist
-                        watchlist = df[((df[p_col] > 2) & (df[oi_col] < -5)) | 
-                                       ((df[p_col] < -2) & (df[oi_col] > 5))].copy()
+                    # Step 2: Dynamically find columns
+                    inst_col = get_col(raw_df, ['INSTRUMENT', 'INST'])
+                    sym_col = get_col(raw_df, ['SYMBOL', 'SYM'])
+                    p_col = get_col(raw_df, ['PCHANGE', 'P_CHANGE', 'PCT_CHG'])
+                    oi_col = get_col(raw_df, ['CHANGEOI', 'CHANGE_OI', 'CHG_OI'])
+                    last_col = get_col(raw_df, ['LAST', 'CLOSE', 'LTP'])
+
+                    if inst_col:
+                        # Step 3: Filter for Futures only
+                        df = raw_df[raw_df[inst_col].isin(['FUTSTK', 'FUTIDX'])].copy()
                         
-                        if not watchlist.empty:
-                            watchlist['DATE'] = curr.strftime("%d-%m-%Y")
-                            watchlist['ACTION'] = watchlist[p_col].apply(lambda x: 'BUY WATCHLIST' if x > 0 else 'SELL WATCHLIST')
+                        if p_col and oi_col:
+                            # Final Logic: Gap Up (Price > 2%, OI < -5%) OR Gap Down (Price < -2%, OI > 5%)
+                            watchlist = df[((df[p_col] > 2) & (df[oi_col] < -5)) | 
+                                           ((df[p_col] < -2) & (df[oi_col] > 5))].copy()
                             
-                            # Sirf wahi dikhayenge jo kaam ka hai
-                            all_days_data.append(watchlist[['DATE', 'SYMBOL', 'LAST', p_col, oi_col, 'ACTION']])
-                            print(f"✅ {curr.date()}: {len(watchlist)} stocks filtered")
+                            if not watchlist.empty:
+                                watchlist['DATE'] = curr.strftime("%d-%m-%Y")
+                                watchlist['ACTION'] = watchlist[p_col].apply(lambda x: 'BUY' if x > 0 else 'SELL')
+                                
+                                # Keep only clean data
+                                result = watchlist[['DATE', sym_col, last_col, p_col, oi_col, 'ACTION']]
+                                all_days_data.append(result)
+                                print(f"✅ {curr.date()}: {len(watchlist)} stocks filtered")
                 time.sleep(1)
-            except:
-                pass
+            except Exception as e:
+                pass 
         curr += timedelta(days=1)
 
     if all_days_data:
         final_report = pd.concat(all_days_data)
         final_report.to_csv("watchlist_30_days.csv", index=False)
-        print("💾 File Ready: watchlist_30_days.csv")
+        print("💾 Success! watchlist_30_days.csv created.")
     else:
-        # Emergency: Agar koi signal na mile to poori list save kar dein
-        print("⚠️ No signals found. Saving Friday's main stock list.")
-        raw_df = nse.get_fno_bhav_copy(datetime(2026, 1, 16))
-        raw_df.columns = [c.upper().strip() for c in raw_df.columns]
-        raw_df[raw_df['INSTRUMENT'] == 'FUTSTK'].to_csv("watchlist_30_days.csv", index=False)
+        # Emergency: Ensure the file is never empty
+        pd.DataFrame(columns=['DATE', 'SYMBOL', 'LAST', 'PCHANGE', 'OI_CHANGE', 'ACTION']).to_csv("watchlist_30_days.csv", index=False)
+        print("⚠️ No signals found. Empty file with headers created.")
 
 if __name__ == "__main__":
     fetch_trade_list()
