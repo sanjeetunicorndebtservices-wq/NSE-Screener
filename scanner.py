@@ -13,7 +13,7 @@ def send_telegram(text):
 
 try:
     # Fetch today's Bhavcopy
-    df = nse_fno_bhavcopy()
+    df = df = nse_fno_bhavcopy()
     
     # LOGIC: Short Squeeze (Price rose > 2%, Open Interest fell > 5%)
     squeeze = df[(df['pChange'] > 2) & (df['changeOI'] < -5)]['symbol'].tolist()
