@@ -2,80 +2,61 @@ from nsepython import *
 import pandas as pd
 from datetime import datetime, timedelta
 
-results = []
-valid_days = 0
-days_back = 0
+def classify_signal(price_pct, oi_pct):
+    if price_pct > 1.5 and oi_pct > 3:
+        return "LONG_BUILDUP"
+    if price_pct < -1.5 and oi_pct > 3:
+        return "SHORT_BUILDUP"
+    if price_pct > 1.5 and oi_pct < -3:
+        return "SHORT_COVERING"
+    if price_pct < -1.5 and oi_pct < -3:
+        return "LONG_UNWINDING"
+    return None
 
-print("🔍 Backtesting last 30 trading days (F&O Short Covering / Aggressive Shorts)...")
+def confidence_score(price_pct, oi_pct):
+    return min(100, round(abs(price_pct) * 12 + abs(oi_pct) * 6))
 
-while valid_days < 30 and days_back < 70:
-    trade_date = datetime.now() - timedelta(days=days_back)
-    date_str = trade_date.strftime("%d-%m-%Y")
+rows = []
+days = 0
+back = 0
+
+while days < 30 and back < 70:
+    date = datetime.now() - timedelta(days=back)
+    ds = date.strftime("%d-%m-%Y")
 
     try:
-        df = nse_fno_bhavcopy(date_str)
-
+        df = nse_fno_bhavcopy(ds)
         if df is None or df.empty:
-            days_back += 1
+            back += 1
             continue
 
         df.columns = df.columns.str.strip()
-
-        required = [
-            'symbol',
-            'openPrice',
-            'closePrice',
-            'openInterest',
-            'changeinOpenInterest'
-        ]
-
-        if not all(col in df.columns for col in required):
-            print(f"⚠️ {date_str} → Missing required columns")
-            days_back += 1
-            continue
-
-        # Price % change
         df['PRICE_PCT'] = ((df['closePrice'] - df['openPrice']) / df['openPrice']) * 100
-
-        # OI % change (safe)
         prev_oi = df['openInterest'] - df['changeinOpenInterest']
         df = df[prev_oi != 0]
         df['OI_PCT'] = (df['changeinOpenInterest'] / prev_oi) * 100
 
-        # 🔥 SAME LOGIC AS SCANNER
-        signals = df[
-            ((df['PRICE_PCT'] > 2) & (df['OI_PCT'] < -5)) |   # Short covering
-            ((df['PRICE_PCT'] < -2) & (df['OI_PCT'] > 5))    # Aggressive shorting
-        ].copy()
+        for _, r in df.iterrows():
+            signal = classify_signal(r['PRICE_PCT'], r['OI_PCT'])
+            if not signal:
+                continue
 
-        print(f"✅ {date_str} → {len(signals)} signals")
-
-        for _, row in signals.iterrows():
-            results.append({
-                'Date': date_str,
-                'Symbol': row['symbol'],
-                'Close': round(row['closePrice'], 2),
-                'Price_%': round(row['PRICE_PCT'], 2),
-                'OI_%': round(row['OI_PCT'], 2),
-                'Signal_Type': (
-                    'SHORT_COVERING' if row['PRICE_PCT'] > 0 else 'AGGRESSIVE_SHORT'
-                )
+            rows.append({
+                "DATE": ds,
+                "SYMBOL": r['symbol'],
+                "LAST_PRICE": round(r['closePrice'], 2),
+                "PRICE_CHANGE_PCT": round(r['PRICE_PCT'], 2),
+                "OI_CHANGE_PCT": round(r['OI_PCT'], 2),
+                "SIGNAL_TYPE": signal,
+                "CONFIDENCE_SCORE": confidence_score(r['PRICE_PCT'], r['OI_PCT'])
             })
 
-        valid_days += 1
+        days += 1
 
-    except Exception as e:
-        print(f"❌ {date_str} → {e}")
+    except:
+        pass
 
-    days_back += 1
+    back += 1
 
-# 🔒 ALWAYS create CSV
-final_df = pd.DataFrame(results)
-
-if final_df.empty:
-    final_df = pd.DataFrame(columns=[
-        'Date', 'Symbol', 'Close', 'Price_%', 'OI_%', 'Signal_Type'
-    ])
-
-final_df.to_csv("accuracy_report_30days.csv", index=False)
-print(f"💾 accuracy_report_30days.csv created | Rows: {len(final_df)}")
+pd.DataFrame(rows).to_csv("accuracy_report_30days.csv", index=False)
+print("✅ accuracy_report_30days.csv generated")
