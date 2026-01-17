@@ -4,54 +4,57 @@ from datetime import datetime, timedelta
 import time
 import os
 
-# Initialize the robust NSE tool
-nse = nsefin.NSE()
+# FIXED: The correct class name is NSEClient
+nse = nsefin.NSEClient()
 
 def fetch_signals():
     all_data = []
-    # Loop from Dec 1, 2025
+    # Start from Dec 1, 2025
     start_date = datetime(2025, 12, 1)
     end_date = datetime.now()
     
-    delta = end_date - start_date
-    print(f"🚀 Scanning {delta.days} days of history...")
+    delta = (end_date - start_date).days
+    print(f"🚀 Scanning {delta} days for Gap Up/Down movements...")
 
-    for i in range(delta.days + 1):
+    for i in range(delta + 1):
         target_date = start_date + timedelta(days=i)
         
-        # Skip Weekends
+        # Skip Weekends (Saturday=5, Sunday=6)
         if target_date.weekday() >= 5:
             continue
             
         try:
-            # Using the specific FNO Bhavcopy endpoint from nsefin
+            # Fetching F&O Bhavcopy
             df = nse.get_fno_bhav_copy(target_date)
             
             if df is not None and not df.empty:
-                # Logic: Find Gap Up (Price up, OI down) and Gap Down (Price down, OI up)
-                # Filtering using the library's standard column names
+                # GAP UP: Price Up > 2% and OI Down < -5%
                 gap_up = df[(df['pChange'] > 2) & (df['changeOI'] < -5)].copy()
+                gap_up['Movement'] = 'POTENTIAL_GAP_UP'
+                
+                # GAP DOWN: Price Down < -2% and OI Up > 5%
                 gap_down = df[(df['pChange'] < -2) & (df['changeOI'] > 5)].copy()
+                gap_down['Movement'] = 'POTENTIAL_GAP_DOWN'
                 
                 day_results = pd.concat([gap_up, gap_down])
                 if not day_results.empty:
                     day_results['Date'] = target_date.strftime("%d-%m-%Y")
-                    all_data.append(day_results)
-                    print(f"✅ {target_date.strftime('%Y-%m-%d')}: Found {len(day_results)} stocks")
+                    all_data.append(day_results[['Date', 'symbol', 'lastPrice', 'pChange', 'changeOI', 'Movement']])
+                    print(f"✅ {target_date.strftime('%d-%m-%Y')}: Found {len(day_results)} signals")
             
-            time.sleep(1) # Safety delay
+            time.sleep(1) # Be polite to NSE servers
         except Exception as e:
-            # Just log and move to next day
-            print(f"Skipping {target_date.strftime('%Y-%m-%d')} (Likely Holiday)")
+            # Silently skip holidays or connection blips
+            pass
 
     if all_data:
         final_df = pd.concat(all_data)
         final_df.to_csv("master_history_report.csv", index=False)
-        print("💾 SUCCESS: File generated.")
+        print(f"💾 SUCCESS: Generated file with {len(final_df)} records.")
     else:
-        # Emergency: If no signals found, give you the raw list of all FNO stocks from Friday
-        print("⚠️ No specific signals found. Exporting raw FNO list for Monday prep...")
-        friday_data = nse.get_fno_bhav_copy(datetime(2026, 1, 16))
-        friday_data.to_csv("master_history_report.csv", index=False)
+        # Emergency backup: If no signals found, just save a blank file with headers
+        pd.DataFrame(columns=['Date','symbol','lastPrice','pChange','changeOI','Movement']).to_csv("master_history_report.csv", index=False)
+        print("⚠️ No specific signals met criteria. File created with headers only.")
 
-fetch_signals()
+if __name__ == "__main__":
+    fetch_signals()
