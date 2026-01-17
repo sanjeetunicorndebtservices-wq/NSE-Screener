@@ -5,79 +5,66 @@ import time
 
 nse = nsefin.NSEClient()
 
-def fetch_trade_list():
-    all_days_data = []
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=45)
+def classify_signal(price_pct, oi_pct):
+    if price_pct > 1.5 and oi_pct > 3:
+        return "LONG_BUILDUP"
+    if price_pct < -1.5 and oi_pct > 3:
+        return "SHORT_BUILDUP"
+    if price_pct > 1.5 and oi_pct < -3:
+        return "SHORT_COVERING"
+    if price_pct < -1.5 and oi_pct < -3:
+        return "LONG_UNWINDING"
+    return None
 
-    print("🔍 Scanning last 30 trading days (F&O)...")
+def confidence_score(price_pct, oi_pct):
+    return min(100, round(abs(price_pct) * 12 + abs(oi_pct) * 6))
 
-    curr = start_date
-    while curr <= end_date:
-        if curr.weekday() < 5:  # Skip weekends
+def run_history_scan():
+    rows = []
+    end = datetime.now()
+    start = end - timedelta(days=45)
+
+    curr = start
+    while curr <= end:
+        if curr.weekday() < 5:
             try:
                 df = nse.get_fno_bhav_copy(curr)
-
                 if df is None or df.empty:
                     curr += timedelta(days=1)
                     continue
 
-                # Clean column names
                 df.columns = df.columns.str.strip()
+                df = df[df['INSTRUMENT'].isin(['FUTSTK', 'FUTIDX'])]
 
-                # Futures only
-                df = df[df['INSTRUMENT'].isin(['FUTSTK', 'FUTIDX'])].copy()
-
-                # Required columns
-                required = ['SYMBOL', 'OPEN', 'CLOSE', 'OPEN_INT', 'CHG_IN_OI']
-                if not all(col in df.columns for col in required):
-                    print(f"⚠️ {curr.date()} → Missing required columns")
-                    curr += timedelta(days=1)
-                    continue
-
-                # Price % change
                 df['PRICE_PCT'] = ((df['CLOSE'] - df['OPEN']) / df['OPEN']) * 100
-
-                # OI % change (safe)
                 prev_oi = df['OPEN_INT'] - df['CHG_IN_OI']
                 df = df[prev_oi != 0]
                 df['OI_PCT'] = (df['CHG_IN_OI'] / prev_oi) * 100
 
-                # 🔥 BTST / STBT Logic
-                watchlist = df[
-                    ((df['PRICE_PCT'] > 2) & (df['OI_PCT'] < -5)) |
-                    ((df['PRICE_PCT'] < -2) & (df['OI_PCT'] > 5))
-                ].copy()
+                for _, r in df.iterrows():
+                    signal = classify_signal(r['PRICE_PCT'], r['OI_PCT'])
+                    if not signal:
+                        continue
 
-                if not watchlist.empty:
-                    watchlist['DATE'] = curr.strftime("%d-%m-%Y")
-                    watchlist['ACTION'] = watchlist['PRICE_PCT'].apply(
-                        lambda x: 'BUY' if x > 0 else 'SELL'
-                    )
+                    rows.append({
+                        "DATE": curr.strftime("%d-%m-%Y"),
+                        "SYMBOL": r['SYMBOL'],
+                        "LAST_PRICE": round(r['CLOSE'], 2),
+                        "PRICE_CHANGE_PCT": round(r['PRICE_PCT'], 2),
+                        "OI_CHANGE_PCT": round(r['OI_PCT'], 2),
+                        "SIGNAL_TYPE": signal,
+                        "CONFIDENCE_SCORE": confidence_score(r['PRICE_PCT'], r['OI_PCT'])
+                    })
 
-                    all_days_data.append(
-                        watchlist[['DATE', 'SYMBOL', 'CLOSE', 'PRICE_PCT', 'OI_PCT', 'ACTION']]
-                    )
-
-                    print(f"✅ {curr.date()} → {len(watchlist)} stocks")
-
-                time.sleep(1)  # NSE rate safety
+                time.sleep(1)
 
             except Exception as e:
-                print(f"❌ {curr.date()} → {e}")
+                print(f"{curr.date()} → {e}")
 
         curr += timedelta(days=1)
 
-    # 🔒 ALWAYS create CSV (critical for GitHub Actions)
-    if all_days_data:
-        report = pd.concat(all_days_data)
-    else:
-        report = pd.DataFrame(
-            columns=['DATE', 'SYMBOL', 'CLOSE', 'PRICE_PCT', 'OI_PCT', 'ACTION']
-        )
-
-    report.to_csv("watchlist_30_days.csv", index=False)
-    print(f"💾 watchlist_30_days.csv created | Rows: {len(report)}")
+    pd.DataFrame(rows).to_csv("watchlist_30_days.csv", index=False)
+    print("✅ watchlist_30_days.csv generated")
 
 if __name__ == "__main__":
-    fetch_trade_list()
+    run_history_scan()
