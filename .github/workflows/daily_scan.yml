@@ -1,8 +1,6 @@
 name: Daily Stock Scan
 on:
-  schedule:
-    - cron: '30 14 * * *'  # 8:00 PM IST
-  workflow_dispatch:       # Manual trigger
+  workflow_dispatch:
 
 jobs:
   build:
@@ -19,14 +17,11 @@ jobs:
       - name: Install Tools
         run: pip install nsepython pandas requests
 
-      - name: Run Scanner
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Run Backtest
         run: python backtest_30_days.py
 
-      - name: Archive Daily Report
+      - name: Archive Results
         uses: actions/upload-artifact@v4
         with:
-          name: daily-stock-data-${{ github.run_id }}
-          path: "*.csv"  # This saves any CSV file created by your script
+          name: Trading-Report
+          path: "**/*.csv"  # This forces GitHub to find the file anywhere
