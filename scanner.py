@@ -3,75 +3,47 @@ import requests
 from datetime import datetime
 from nsepython import *
 
-# Telegram credentials (GitHub Secrets)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def send_telegram(message):
-    if not TOKEN or not CHAT_ID:
-        print("❌ Telegram credentials missing")
-        return
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(
-        url,
-        json={
-            "chat_id": CHAT_ID,
-            "text": message,
-            "parse_mode": "Markdown"
-        },
-        timeout=10
-    )
+def classify_signal(price_pct, oi_pct):
+    if price_pct > 1.5 and oi_pct > 3:
+        return "LONG_BUILDUP"
+    if price_pct < -1.5 and oi_pct > 3:
+        return "SHORT_BUILDUP"
+    if price_pct > 1.5 and oi_pct < -3:
+        return "SHORT_COVERING"
+    if price_pct < -1.5 and oi_pct < -3:
+        return "LONG_UNWINDING"
+    return None
 
-try:
-    today = datetime.now().strftime("%d-%m-%Y")
-    df = nse_fno_bhavcopy(today)
+def confidence_score(price_pct, oi_pct):
+    return min(100, round(abs(price_pct) * 12 + abs(oi_pct) * 6))
 
-    if df is None or df.empty:
-        raise Exception("Empty F&O bhavcopy")
+def send(msg):
+    if TOKEN and CHAT_ID:
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={"chat_id": CHAT_ID, "text": msg}
+        )
 
-    df.columns = df.columns.str.strip()
+today = datetime.now().strftime("%d-%m-%Y")
+df = nse_fno_bhavcopy(today)
+df.columns = df.columns.str.strip()
 
-    required = [
-        'symbol',
-        'openPrice',
-        'closePrice',
-        'openInterest',
-        'changeinOpenInterest'
-    ]
+df['PRICE_PCT'] = ((df['closePrice'] - df['openPrice']) / df['openPrice']) * 100
+prev_oi = df['openInterest'] - df['changeinOpenInterest']
+df = df[prev_oi != 0]
+df['OI_PCT'] = (df['changeinOpenInterest'] / prev_oi) * 100
 
-    if not all(col in df.columns for col in required):
-        raise Exception("Required columns missing in bhavcopy")
+signals = []
 
-    # Price % change
-    df['PRICE_PCT'] = ((df['closePrice'] - df['openPrice']) / df['openPrice']) * 100
+for _, r in df.iterrows():
+    sig = classify_signal(r['PRICE_PCT'], r['OI_PCT'])
+    if sig:
+        signals.append(
+            f"{r['symbol']} | {sig} | Conf:{confidence_score(r['PRICE_PCT'], r['OI_PCT'])}"
+        )
 
-    # OI % change (safe)
-    prev_oi = df['openInterest'] - df['changeinOpenInterest']
-    df = df[prev_oi != 0]
-    df['OI_PCT'] = (df['changeinOpenInterest'] / prev_oi) * 100
-
-    # 🔥 Scanner logic (same as history + backtest)
-    squeeze = df[
-        (df['PRICE_PCT'] > 2) &
-        (df['OI_PCT'] < -5)
-    ]['symbol'].tolist()
-
-    shorting = df[
-        (df['PRICE_PCT'] < -2) &
-        (df['OI_PCT'] > 5)
-    ]['symbol'].tolist()
-
-    report = "📊 *NSE Daily F&O Smart Money Report*\n\n"
-
-    report += "🚀 *BTST – Short Covering (Buy)*\n"
-    report += ", ".join(squeeze) if squeeze else "None"
-
-    report += "\n\n📉 *STBT – Aggressive Shorts (Sell)*\n"
-    report += ", ".join(shorting) if shorting else "None"
-
-    send_telegram(report)
-    print("✅ Telegram alert sent")
-
-except Exception as e:
-    send_telegram(f"❌ Scanner Error: `{str(e)}`")
-    print(e)
+msg = "📊 Institutional Daily Signals\n\n" + ("\n".join(signals) if signals else "No signals")
+send(msg)
