@@ -22,7 +22,7 @@ jobs:
           pip install nsefin nsepython pandas requests
 
       - name: Run 30-Day History Scanner
-        run: python get_history.py
+        run: institutional_scan_range.py
 
       - name: List Generated Files
         run: ls -lh
